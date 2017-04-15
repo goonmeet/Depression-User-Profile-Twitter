@@ -7,13 +7,27 @@ from time import sleep, time
 import pandas as pd
 import numpy as np
 from pandas.io.json import json_normalize
+import urllib, cStringIO
+import Image
+import pytesseract
+def get_all_user_names_test():
+	users = es_users.getAllUsers()
+	user_names = []
+	for user in users:
+		user_names.append(user["_id"])
+	df = pd.DataFrame({'USER_ID': user_names})
+	return df
 
 def get_user_tweet_objs(screen_name):
 	tweet_jsons = es_users.getStoredTweets(screen_name)
+	if len(tweet_jsons) == 0:
+		return None
 	all_user_tweet_obj = []
 	tweet_obj = {}
 	#print screen_name
 	for tweet_json in tweet_jsons:
+		img_text = ""
+		img_url = ""
 		#print tweet_json["_source"]
 		tweet_json = json.loads(json.dumps(tweet_json))
 		tweet_obj["es_id"] = tweet_json["_id"]
@@ -30,6 +44,17 @@ def get_user_tweet_objs(screen_name):
 		if "coordinates" in tweet_json:
 			if "coordinates" in tweet_json["coordinates"]:
 				tweet_obj["coordinates"] = tweet_json["coordinates"]["coordinates"]
+		if "entities" in tweet_json["_source"]:
+			if ("media" in tweet_json["_source"]["entities"]) and (tweet_json["_source"]["entities"]["media"] is not None):
+				img_text = ""
+				for x in tweet_json["_source"]["entities"]["media"]:
+					img_url = str(x["media_url_https"])
+					file = cStringIO.StringIO(urllib.urlopen(str(x["media_url_https"])).read())
+					img = Image.open(file)
+					img_text = pytesseract.image_to_string(img)
+					print img_text
+		tweet_obj["img_text"] = str(img_text)
+		tweet_obj["img_url"] = img_url	
 		#print tweet_obj
 		all_user_tweet_obj.append(tweet_obj)
 		tweet_obj = {}
@@ -59,7 +84,11 @@ def get_user_data(list_df):
 	        user_profile_json = user_profile_json[0]
 	        user_profile_json = json.loads(json.dumps(user_profile_json["_source"]))
 	        user_tweets_obj = get_user_tweet_objs(row['USER_ID'])
+	        if user_tweets_obj is None:
+				continue
 	        user_all_tweets_string, avg_fav_count, avg_retweet_count, min_fav_count, max_fav_count = user_tweets_string(user_tweets_obj)# avg_fav_count, avg_retweet_count, min_fav_count, max_fav_count = 0
+	        if user_all_tweets_string is None:
+				continue
 	        user_profile_json["tweets"] = user_all_tweets_string
 	        user_profile_json["avg_fav_count"] = avg_fav_count
 	        user_profile_json["avg_retweet_count"] = avg_retweet_count
@@ -97,13 +126,26 @@ def user_tweets_string(user_tweets_obj):
 	return user_all_tweets_string, avg_fav_count, avg_retweet_count, min_fav_count, max_fav_count
 
 if __name__ == "__main__":
-    df = pd.read_csv("users_list/profile_goldstandard.csv", quotechar="\"", header = 0)
-    foo = "DEPRESSED/NO"
-    yes_df =  df.loc[df["DEPRESSED/NO"] == "yes"]
-    no_df =  df.loc[df['DEPRESSED/NO'] == "no"]
-    yes_user_data = get_user_data(yes_df)
-    no_user_data = get_user_data(no_df)
-    print (list(yes_user_data))
+	test_data = get_user_data(get_all_user_names_test())
+	print "Done with test data frame"
+	df_ric = pd.read_csv("users_list/profile_goldstandard_ric.csv", quotechar="\"", header = 0, error_bad_lines=False, encoding='utf-8', engine='c')
+	df_des = pd.read_csv("users_list/profile_goldstandard_des.csv", quotechar="\"", header = 0, error_bad_lines=False, encoding='utf-8', engine='c')
+	foo = "DEPRESSED/NO"
+	yes_df =  df_ric.loc[df_ric["DEPRESSED/NO"] == "yes"]
+	print len(yes_df)
+	yes_df_des = (df_des.loc[df_des["DEPRESSED/NO"] == "yes"])
+	yes_df = yes_df.append(yes_df_des)
+	print len(yes_df)
+	#no_df =  df.loc[df['DEPRESSED/NO'] == "no"]
+	for index, row in yes_df.iterrows():
+		user_profile_json = es_users.getUserProfile(row['USER_ID'])
+		if len(user_profile_json) == 0:
+			print row['USER_ID']
+	# yes_user_data = get_user_data(yes_df)
+# 	print "Done with yes data frame"
+# 	no_user_data = get_user_data(no_df)
+# 	print "Done with no data frame"
+    #print (list(yes_user_data))
     #print yes_user_data.ix[0]["tweets"]
     #print no_user_data.ix[0]
     #print len(get_user_tweet_objs("rahzamdy"))
